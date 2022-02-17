@@ -3,6 +3,7 @@ package tengo
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
 	"path/filepath"
 	"sync"
 
@@ -18,6 +19,8 @@ type Script struct {
 	maxConstObjects  int
 	enableFileImport bool
 	importDir        string
+	fileName         string
+	defaultExt       string
 }
 
 // NewScript creates a Script instance with an input script.
@@ -27,7 +30,33 @@ func NewScript(input []byte) *Script {
 		input:           input,
 		maxAllocs:       -1,
 		maxConstObjects: -1,
+		fileName:        "(main)",
+		defaultExt:      SourceFileExtDefault,
 	}
+}
+func NewScriptWith(input []byte, fileName string, defaultExt string) *Script {
+	return &Script{
+		variables:       make(map[string]*Variable),
+		input:           input,
+		maxAllocs:       -1,
+		maxConstObjects: -1,
+		fileName:        fileName,
+		defaultExt:      defaultExt,
+	}
+}
+func NewScriptFromFile(fileName string) (*Script, error) {
+	input, err := ioutil.ReadFile(fileName)
+	if err != nil {
+		return nil, err
+	}
+	return &Script{
+		variables:       make(map[string]*Variable),
+		input:           input,
+		maxAllocs:       -1,
+		maxConstObjects: -1,
+		fileName:        fileName,
+		defaultExt:      filepath.Ext(fileName),
+	}, nil
 }
 
 // Add adds a new variable or updates an existing variable to the script.
@@ -96,7 +125,7 @@ func (s *Script) Compile() (*Compiled, error) {
 	}
 
 	fileSet := parser.NewFileSet()
-	srcFile := fileSet.AddFile("(main)", -1, len(s.input))
+	srcFile := fileSet.AddFile(s.fileName, -1, len(s.input))
 	p := parser.NewParser(srcFile, s.input, nil)
 	file, err := p.ParseFile()
 	if err != nil {
