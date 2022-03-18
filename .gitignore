@@ -1,1 +1,4 @@
 dist/
+.idea
+**/.MWebMetaData
+**/.DS_Store
