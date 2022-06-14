@@ -3,6 +3,7 @@ package tengo
 import (
 	"context"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"path/filepath"
 	"sync"
@@ -21,6 +22,8 @@ type Script struct {
 	importDir        string
 	fileName         string
 	defaultExt       string
+	constants        []Object
+	trace            io.Writer
 }
 
 // NewScript creates a Script instance with an input script.
@@ -70,6 +73,15 @@ func (s *Script) Add(name string, value interface{}) error {
 		value: obj,
 	}
 	return nil
+}
+
+func (s *Script) WithTrace(trace io.Writer) *Script {
+	s.trace = trace
+	return s
+}
+func (s *Script) WithConstants(constants []Object) *Script {
+	s.constants = constants
+	return s
 }
 
 // Remove removes (undefines) an existing variable for the script. It returns
@@ -132,7 +144,7 @@ func (s *Script) Compile() (*Compiled, error) {
 		return nil, err
 	}
 
-	c := NewCompiler(srcFile, symbolTable, nil, s.modules, nil)
+	c := NewCompiler(srcFile, symbolTable, s.constants, s.modules, s.trace)
 	c.EnableFileImport(s.enableFileImport)
 	c.SetImportDir(s.importDir)
 	if err := c.Compile(file); err != nil {
@@ -227,6 +239,7 @@ type Compiled struct {
 	globalIndexes map[string]int // global symbol name to index
 	bytecode      *Bytecode
 	globals       []Object
+	outIdx        int
 	maxAllocs     int64
 	lock          sync.RWMutex
 }
@@ -273,6 +286,115 @@ func (c *Compiled) RunContext(ctx context.Context) (err error) {
 	return
 }
 
+//
+//// Call calls callable tengo.Object with given arguments, and returns result.
+//// args must be convertible to supported Tengo types.
+//func (c *Compiled) Call(fn Object,
+//	args ...interface{}) (interface{}, error) {
+//	return c.CallContext(nil, fn, args...)
+//}
+//
+//// CallContext calls callable tengo.Object with given arguments, and returns result.
+//// args must be convertible to supported Tengo types.
+//func (c *Compiled) CallContext(ctx context.Context, fn Object,
+//	args ...interface{}) (interface{}, error) {
+//	c.lock.Lock()
+//	defer c.lock.Unlock()
+//
+//	if fn == nil {
+//		return nil, errors.New("callable expected, got nil")
+//	}
+//	if !fn.CanCall() {
+//		return nil, errors.New("not a callable")
+//	}
+//
+//	return c.call(ctx, fn, args...)
+//}
+//
+//func (c *Compiled) call(ctx context.Context, cfn Object,
+//	args ...interface{}) (interface{}, error) {
+//	targs := make([]Object, 0, len(args))
+//	for i := range args {
+//		v, err := FromInterface(args[i])
+//		if err != nil {
+//			return nil, err
+//		}
+//		targs = append(targs, v)
+//	}
+//
+//	v, err := c.callCompiled(ctx, cfn, targs...)
+//	if err != nil {
+//		return nil, err
+//	}
+//	return ToInterface(v), nil
+//}
+//
+//func (c *Compiled) callCompiled(ctx context.Context, fn Object,
+//	args ...Object) (Object, error) {
+//
+//	constsOffset := len(c.bytecode.Constants)
+//
+//	// Load fn
+//	inst := MakeInstruction(parser.OpConstant, constsOffset)
+//
+//	// Load args
+//	for i := range args {
+//		inst = append(inst,
+//			MakeInstruction(parser.OpConstant, constsOffset+i+1)...)
+//	}
+//
+//	// Call, set value to a global, stop
+//	inst = append(inst, MakeInstruction(parser.OpCall, len(args))...)
+//	inst = append(inst, MakeInstruction(parser.OpSetGlobal, c.outIdx)...)
+//	inst = append(inst, MakeInstruction(parser.OpSuspend)...)
+//
+//	c.bytecode.Constants = append(c.bytecode.Constants, fn)
+//	c.bytecode.Constants = append(c.bytecode.Constants, args...)
+//
+//	// orig := s.bytecode.MainFunction
+//	c.bytecode.MainFunction = &CompiledFunction{
+//		Instructions: inst,
+//	}
+//
+//	var err error
+//	if ctx == nil {
+//		vm := NewVM(c.bytecode, c.globals, c.maxAllocs)
+//		err = vm.Run()
+//	} else {
+//		vm := NewVM(c.bytecode, c.globals, c.maxAllocs)
+//		err = runVMContext(ctx, vm)
+//	}
+//
+//	// TODO: go back to normal if required
+//	// s.bytecode.MainFunction = orig
+//	// avoid memory leak.
+//	for i := constsOffset; i < len(c.bytecode.Constants); i++ {
+//		c.bytecode.Constants[i] = nil
+//	}
+//	c.bytecode.Constants = c.bytecode.Constants[:constsOffset]
+//
+//	// get symbol using index and return it
+//	return c.globals[c.outIdx], err
+//}
+
+func runVMContext(ctx context.Context, vm *VM) (err error) {
+	errch := make(chan error)
+	go func() {
+		errch <- vm.Run()
+	}()
+	select {
+	case err = <-errch:
+	case <-ctx.Done():
+		vm.Abort()
+		<-errch
+		err = ctx.Err()
+	}
+	if err != nil {
+		return
+	}
+	return
+}
+
 // Clone creates a new copy of Compiled. Cloned copies are safe for concurrent
 // use by multiple goroutines.
 func (c *Compiled) Clone() *Compiled {
@@ -292,6 +414,10 @@ func (c *Compiled) Clone() *Compiled {
 		}
 	}
 	return clone
+}
+
+func (c *Compiled) ByteCode() *Bytecode {
+	return c.bytecode
 }
 
 // IsDefined returns true if the variable name is defined (has value) before or

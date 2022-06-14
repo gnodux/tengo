@@ -493,7 +493,7 @@ module using `import` expression.
 
 Main module:
 
-```golang
+```go
 sum := import("./sum")  // load module from a local file
 fmt.print(sum(10))      // module function
 ```

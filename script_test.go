@@ -546,3 +546,30 @@ func compiledIsDefined(
 ) {
 	require.Equal(t, expected, c.IsDefined(name))
 }
+
+//func TestCompiled_Call(t *testing.T) {
+//	//not work
+//	script := tengo.NewScript([]byte(`
+//fmt:=import("fmt")
+//c:=callback(func(){
+//	return "callback call"
+//})
+//fmt.println("executing...")
+//fmt.println(c)
+//`))
+//	script.SetImports(stdlib.GetModuleMap("fmt"))
+//	var compiled *tengo.Compiled
+//	var err error
+//	f := &tengo.UserFunction{Name: "callback", Value: func(args ...tengo.Object) (ret tengo.Object, err error) {
+//
+//		compiled.Call(args[0])
+//		return
+//	}}
+//	script.Add("callback", f)
+//	compiled, err = script.Compile()
+//	if err != nil {
+//		t.Error(err)
+//		return
+//	}
+//	compiled.Run()
+//}
